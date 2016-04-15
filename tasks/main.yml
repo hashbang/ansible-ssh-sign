@@ -1,0 +1,32 @@
+- name: List SSH keys
+  command: ls ssh_host_*_key chdir=/etc/ssh
+  register: keys
+
+- name: Handle {{ item }}@{{ ansible_hostname }}
+  actions:
+    - name: Test if {{ item }}-cert.pub exists
+      stat: path=/etc/ssh/{{ item }}-cert.pub
+      register: cert
+
+    - name: Sign {{ item }}
+      tasks:
+        - fetch:
+            src: /etc/ssh/{{ item }}.pub
+            dest: .ssh-sign
+        - local_action:
+            command: ssh-keygen -s {{ ca_key }} -h -n {{ ansible_fqdn }} .ssh-sign/{{ ansible_fqdn }}/etc/ssh/{{ item }}.pub
+        - copy:
+            src: .ssh-sign/{{ ansible_fqdn }}/etc/ssh/{{ item }}-cert.pub
+            dest: /etc/ssh/
+            mode: 0644
+        - lineinfile:
+            dest: /etc/ssh/sshd_config
+            line: HostCertificate /etc/ssh/{{ item }}-cert.pub
+            state: present
+            insertafter: HostKey /etc/ssh/{{ item }}
+      when: not cert.exists
+
+  with_items: keys.files
+
+- name: Reload SSHd config
+  service: name=ssh state=reloaded
